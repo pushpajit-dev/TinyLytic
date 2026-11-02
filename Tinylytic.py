@@ -599,8 +599,8 @@ class TinyLyticApp(QMainWindow):
         # 1. Update tab titles
         if hasattr(self, 'tabs') and self.tabs:
             tab_titles = [
-                ("Chat", True),      # Free for everyone
-                ("YouTube", True),   # Always free
+                ("Chat", is_act),
+                ("YouTube", True),  # Always free
                 ("Realtime Studio", is_act),
                 ("Audio", is_act),
                 ("Video", is_act),
@@ -613,9 +613,7 @@ class TinyLyticApp(QMainWindow):
                     self.tabs.setTabText(idx, title)
 
         # 2. Update lock banners
-        if hasattr(self, 'lock_banner_chat'):
-            self.lock_banner_chat.setVisible(False)
-        for banner_attr in ['lock_banner_realtime', 'lock_banner_audio', 'lock_banner_video', 'lock_banner_vision']:
+        for banner_attr in ['lock_banner_chat', 'lock_banner_realtime', 'lock_banner_audio', 'lock_banner_video', 'lock_banner_vision']:
             if hasattr(self, banner_attr):
                 getattr(self, banner_attr).setVisible(not is_act)
 
@@ -724,7 +722,6 @@ class TinyLyticApp(QMainWindow):
         backend_row.addWidget(QLabel("Chat Model:"))
         self.chat_backend_combo = QComboBox()
         self.chat_backend_combo.addItem("Built-in AI Assistant (Recommended)")
-        self.chat_backend_combo.addItem("Ollama (Local Auto-Detect)")
         if HAS_LLAMA:
             self.chat_backend_combo.addItem("Local TinyLLaMA")
         backend_row.addWidget(self.chat_backend_combo)
@@ -738,10 +735,18 @@ class TinyLyticApp(QMainWindow):
         return tab
 
     def sendChatQuickQuery(self, query):
+        if not self.is_activated:
+            QMessageBox.warning(self, "Activation Required", "AI Chat Assistant is locked in the free edition.\nYouTube transcription is completely free. Please activate TinyLytic Pro.")
+            self.showActivationDialog()
+            return
         self.chat_input.setText(query)
         self.handleSendChat()
 
     def handleSendChat(self):
+        if not self.is_activated:
+            QMessageBox.warning(self, "Activation Required", "AI Chat Assistant is locked in the free edition.\nYouTube transcription is completely free. Please activate TinyLytic Pro.")
+            self.showActivationDialog()
+            return
         query = self.chat_input.text().strip()
         if not query:
             return
@@ -866,14 +871,9 @@ class TinyLyticApp(QMainWindow):
         if hasattr(self, 'device_combo'):
             self.device_combo.setEnabled(not is_busy)
 
-        # Tab navigation remains enabled so users can chat during processing
+        # Tab navigation lock
         if hasattr(self, 'tabs'):
-            self.tabs.tabBar().setEnabled(True)
-
-        if hasattr(self, 'chat_input'):
-            self.chat_input.setEnabled(True)
-        if hasattr(self, 'chat_send_btn'):
-            self.chat_send_btn.setEnabled(True)
+            self.tabs.tabBar().setEnabled(not is_busy)
 
         # Action buttons across all tabs
         is_act = getattr(self, 'is_activated', False)
@@ -905,25 +905,6 @@ class TinyLyticApp(QMainWindow):
         except Exception:
             pass
 
-    def notifyChatWhileTranscribing(self):
-        """Proactively invite the user to chat while background transcription executes."""
-        if not hasattr(self, 'chat_display'):
-            return
-        import random
-        try:
-            from chat_engine import ICEBREAKER_QUESTIONS
-            q = random.choice(ICEBREAKER_QUESTIONS)
-        except Exception:
-            q = "What is an exciting project or idea you are currently working on?"
-        invite_html = (
-            "<div style='margin: 12px 0; padding: 10px; background-color: #1a202c; border-left: 4px solid #63b3ed; border-radius: 4px;'>"
-            "<b style='color: #63b3ed;'>TinyLytic Assistant:</b><br>"
-            "<span style='color: #edf2f7;'>Are you overwhelmed and tired of waiting for speed? Let's chat inside! "
-            f"Tell me your name? Also, {q}</span>"
-            "</div>"
-        )
-        self.chat_display.append(invite_html)
-
     def processYouTube(self):
         url = self.yt_url_input.text().strip()
         if not url:
@@ -935,7 +916,6 @@ class TinyLyticApp(QMainWindow):
         self.yt_status.setText("Status: Downloading audio stream from YouTube...")
         self.yt_result_box.clear()
 
-        self.notifyChatWhileTranscribing()
         self.yt_worker = YouTubeDownloadWorker(url)
 
         def on_download_done(audio_path):
@@ -997,48 +977,16 @@ class TinyLyticApp(QMainWindow):
         dev_row = QHBoxLayout()
         dev_row.addWidget(QLabel("Microphone:"))
         self.mic_combo = QComboBox()
-        self.mic_combo.addItem("Default System Microphone (Recommended)", None)
         if HAS_SD:
             try:
                 devices = sd.query_devices()
-                valid_devs = []
-                seen_names = set()
-                bad_words = ['mapper', 'primary sound', 'stereo mix', 'virtual', 'cable', 'loopback', 'wave']
                 for idx, dev in enumerate(devices):
                     if dev.get('max_input_channels', 0) > 0:
-                        host_api = dev.get('hostapi', -1)
-                        host_name = ""
-                        try:
-                            host_name = sd.query_hostapis(host_api).get('name', '').lower()
-                        except Exception:
-                            pass
-                        # Disallow Windows WDM-KS which fails with [PaErrorCode -9999] blocking API error on USB mics
-                        if 'wdm-ks' in host_name or 'wdm' in host_name:
-                            continue
-
-                        name = dev.get('name', '').strip()
-                        if any(w in name.lower() for w in bad_words):
-                            continue
-
-                        is_wasapi = ('wasapi' in host_name)
-                        valid_devs.append((idx, name, host_api, is_wasapi))
-
-                # Prioritize WASAPI devices for lowest latency and maximum stability
-                valid_devs.sort(key=lambda x: (not x[3], x[1]))
-
-                # Deduplicate and remove MME-truncated names if a fuller WASAPI name exists
-                for idx, name, host_api, is_wasapi in valid_devs:
-                    # Check if this name is a truncated prefix of another already added device
-                    is_duplicate = False
-                    for seen in seen_names:
-                        if seen.startswith(name) or name.startswith(seen):
-                            is_duplicate = True
-                            break
-                    if not is_duplicate:
-                        seen_names.add(name)
-                        self.mic_combo.addItem(name, idx)
-            except Exception as e:
-                print(f"[Microphone Enumeration]: {e}")
+                        self.mic_combo.addItem(f"{dev['name']}", idx)
+            except Exception:
+                self.mic_combo.addItem("Default Microphone", None)
+        else:
+            self.mic_combo.addItem("Default Microphone", None)
         dev_row.addWidget(self.mic_combo, 1)
 
         self.timer_label = QLabel("00:00:00")
@@ -1153,7 +1101,6 @@ class TinyLyticApp(QMainWindow):
         chunk_len = self.chunk_spin.value()
         num_spk = ("auto" if self.speaker_count_spin.value() == 0 else self.speaker_count_spin.value()) if self.multi_speaker_check.isChecked() else 1
 
-        self.notifyChatWhileTranscribing()
         self.live_transcribe_worker = UnifiedTranscriptionWorker(self.recorded_wav_path, model_id, lang, task, chunk_len, num_speakers=num_spk, device=self.get_selected_compute_device())
         self.live_transcribe_worker.progress.connect(self.live_transcribe_progress.setValue)
         self.live_transcribe_worker.status.connect(self.live_status.setText)
@@ -1254,7 +1201,6 @@ class TinyLyticApp(QMainWindow):
         chunk_len = self.chunk_spin.value()
         num_spk = ("auto" if self.speaker_count_spin.value() == 0 else self.speaker_count_spin.value()) if self.multi_speaker_check.isChecked() else 1
 
-        self.notifyChatWhileTranscribing()
         self.audio_worker = UnifiedTranscriptionWorker(path, model_id, lang, task, chunk_len, num_speakers=num_spk, device=self.get_selected_compute_device())
         self.audio_worker.progress.connect(self.audio_progress.setValue)
         self.audio_worker.status.connect(self.audio_status.setText)
@@ -1384,7 +1330,6 @@ class TinyLyticApp(QMainWindow):
             chunk_len = self.chunk_spin.value()
             num_spk = ("auto" if self.speaker_count_spin.value() == 0 else self.speaker_count_spin.value()) if self.multi_speaker_check.isChecked() else 1
 
-            self.notifyChatWhileTranscribing()
             self.video_worker = UnifiedTranscriptionWorker(out_wav, model_id, lang, task, chunk_len, num_speakers=num_spk, device=self.get_selected_compute_device())
             self.video_worker.progress.connect(self.video_progress.setValue)
             self.video_worker.status.connect(self.video_status.setText)

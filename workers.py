@@ -42,10 +42,8 @@ try:
     import soundfile as sf
     import numpy as np
     HAS_SOUND = True
-    HAS_SD = True
 except Exception:
     HAS_SOUND = False
-    HAS_SD = False
     sd = None
     sf = None
     np = None
@@ -225,33 +223,27 @@ class UnifiedTranscriptionWorker(QThread):
                     bn_prob = probs.get('bn', 0.0)
                     hi_prob = probs.get('hi', 0.0)
 
-                    # Balanced multilingual & code-switching detection
-                    bilingual_prompt = "Transcribe English and Bengali speech accurately. বাংলা হরফ এবং English words together with correct Bengali punctuation (দাঁড়ি ।) and English punctuation."
-                    if bn_prob > 0.80 and bn_prob > en_prob * 2.0:
+                    # Balanced multilingual language detection (prevents false English bias on Bengali/Hindi speech)
+                    if top_lang == 'bn' or (bn_prob >= 0.20 and bn_prob >= en_prob * 0.70):
                         c_lang = 'bn'
                         c_prompt = "বাংলা হরফে স্পষ্ট প্রতিলিপি। সঠিক দাঁড়ি (।) এবং কমা (,) ব্যবহার করুন।"
-                    elif en_prob > 0.80 and en_prob > bn_prob * 2.0:
-                        c_lang = 'en'
-                        c_prompt = None
-                    elif hi_prob > 0.80 and hi_prob > en_prob * 2.0:
+                    elif top_lang == 'hi' or (hi_prob >= 0.22 and hi_prob >= en_prob * 0.70):
                         c_lang = 'hi'
                         c_prompt = "हिन्दी में स्पष्ट प्रतिलेखन।"
+                    elif top_lang == 'en':
+                        c_lang = 'en'
+                        c_prompt = None
                     else:
-                        # Mixed speech / code-switching: do not lock tokenizer
-                        c_lang = None
-                        c_prompt = bilingual_prompt
+                        c_lang = top_lang
+                        c_prompt = None
 
                     pct = 45 + int((idx / total_chunks) * 35)
                     self.progress.emit(pct)
-                    disp_tag = c_lang.upper() if c_lang else "BILINGUAL"
-                    self.status.emit(f"Transcribing segment {idx+1}/{total_chunks} [{disp_tag}]...")
+                    self.status.emit(f"Transcribing segment {idx+1}/{total_chunks} [{c_lang.upper()}]...")
 
                     c_args = dict(transcribe_args)
                     c_args["audio"] = c_audio
-                    if c_lang:
-                        c_args["language"] = c_lang
-                    else:
-                        c_args.pop("language", None)
+                    c_args["language"] = c_lang
                     if c_prompt:
                         c_args["initial_prompt"] = c_prompt
 
@@ -287,19 +279,16 @@ class UnifiedTranscriptionWorker(QThread):
                     hi_prob = probs.get('hi', 0.0)
 
                     # Balanced language detection on short / single-pass audio
-                    bilingual_prompt = "Transcribe English and Bengali speech accurately. বাংলা হরফ এবং English words together with correct Bengali punctuation (দাঁড়ি ।) and English punctuation."
-                    if bn_prob > 0.80 and bn_prob > en_prob * 2.0:
+                    if top_lang == 'bn' or (bn_prob >= 0.20 and bn_prob >= en_prob * 0.70):
                         transcribe_args["language"] = "bn"
                         transcribe_args["initial_prompt"] = "বাংলা হরফে স্পষ্ট প্রতিলিপি। সঠিক দাঁড়ি (।) এবং কমা (,) ব্যবহার করুন।"
-                    elif en_prob > 0.80 and en_prob > bn_prob * 2.0:
-                        transcribe_args["language"] = "en"
-                    elif hi_prob > 0.80 and hi_prob > en_prob * 2.0:
+                    elif top_lang == 'hi' or (hi_prob >= 0.22 and hi_prob >= en_prob * 0.70):
                         transcribe_args["language"] = "hi"
                         transcribe_args["initial_prompt"] = "हिन्दी में स्पष्ट प्रतिलेखन।"
+                    elif top_lang == 'en':
+                        transcribe_args["language"] = "en"
                     else:
-                        # Auto / mixed code-switching
-                        transcribe_args.pop("language", None)
-                        transcribe_args["initial_prompt"] = bilingual_prompt
+                        transcribe_args["language"] = top_lang
 
                 transcript = whisper_model.transcribe(**transcribe_args)
                 segments = transcript.get("segments", [])
@@ -377,67 +366,54 @@ class YouTubeDownloadWorker(QThread):
             ffmpeg_bin = setup_ffmpeg()
             ffmpeg_dir = os.path.dirname(os.path.abspath(ffmpeg_bin)) if (ffmpeg_bin and os.path.isfile(ffmpeg_bin)) else None
 
-            base_opts = {
+            ydl_opts = {
                 "format": "bestaudio/best",
                 "outtmpl": out_template,
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "ios", "mweb", "web"]
+                    }
+                },
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
             }
 
-            # Check if cookies.txt is provided by user in project or temp dir
-            possible_cookies = [
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
-                os.path.join(get_temp_dir(), "cookies.txt"),
-                os.path.expanduser("~/cookies.txt")
-            ]
-            for cp in possible_cookies:
-                if os.path.isfile(cp) and os.path.getsize(cp) > 0:
-                    base_opts["cookiefile"] = cp
-                    break
-
             if ffmpeg_dir:
-                base_opts["ffmpeg_location"] = ffmpeg_dir
-                base_opts["postprocessors"] = [{
+                ydl_opts["ffmpeg_location"] = ffmpeg_dir
+                ydl_opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
                     "preferredquality": "192",
                 }]
 
             self.progress.emit(30)
-            self.status.emit("Downloading audio stream...")
+            self.status.emit("Downloading and extracting audio...")
 
             title = "YouTube Audio"
-            success = False
-            last_err = None
-
-            strategies = [
-                ("Clean standard client", {}),
-                ("iOS mobile client", {"extractor_args": {"youtube": {"player_client": ["ios"]}}}),
-                ("Android client", {"extractor_args": {"youtube": {"player_client": ["android"]}}}),
-                ("TV embedded client", {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}}),
-                ("Mobile web client", {"extractor_args": {"youtube": {"player_client": ["mweb"]}}})
-            ]
-
-            for strat_name, extra_opts in strategies:
-                curr_opts = dict(base_opts)
-                curr_opts.update(extra_opts)
-                try:
-                    self.status.emit(f"Connecting ({strat_name})...")
-                    with yt_dlp.YoutubeDL(curr_opts) as ydl:
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(self.url, download=True)
+                    title = info.get("title", "YouTube Audio")
+            except Exception as dl_err:
+                err_str = str(dl_err).lower()
+                if "bot" in err_str or "sign in" in err_str:
+                    self.status.emit("Retrying with mobile client...")
+                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "ios"]}}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(self.url, download=True)
                         title = info.get("title", "YouTube Audio")
-                        success = True
-                        break
-                except Exception as dl_err:
-                    last_err = dl_err
-                    err_str = str(dl_err).lower()
-                    if "postprocessing" in err_str or "ffprobe" in err_str or "ffmpeg" in err_str:
-                        base_opts.pop("postprocessors", None)
-                    continue
-
-            if not success:
-                raise last_err or RuntimeError("Could not download YouTube stream.")
+                elif "postprocessing" in err_str or "ffprobe" in err_str or "ffmpeg" in err_str:
+                    self.status.emit("Downloading direct audio stream (bypassing postprocessor)...")
+                    ydl_opts.pop("postprocessors", None)
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(self.url, download=True)
+                        title = info.get("title", "YouTube Audio")
+                else:
+                    raise dl_err
 
             self.progress.emit(90)
             self.status.emit("Locating downloaded file...")
@@ -491,91 +467,44 @@ class RealtimeRecorderWorker(QThread):
         self.status.emit("Recording...")
 
         try:
-            native_sr = 44100
-            native_channels = 1
-            if HAS_SD:
-                try:
-                    if self.device_index is not None:
-                        dev_info = sd.query_devices(self.device_index)
-                    else:
-                        dev_info = sd.query_devices(kind='input')
-                    if dev_info:
-                        native_channels = min(2, max(1, dev_info.get('max_input_channels', 1)))
-                        native_sr = int(dev_info.get('default_samplerate', 44100))
-                except Exception:
-                    native_channels = 1
-                    native_sr = 44100
+            with sf.SoundFile(self.output_path, mode='w', samplerate=self.samplerate, channels=1, subtype='PCM_16') as wav_file:
+                def audio_callback(indata, frames, time_info, status_flags):
+                    if not self.is_recording:
+                        raise sd.CallbackStop()
+                    wav_file.write(indata)
+                    # Compute volume metric (RMS / max peak)
+                    peak = float(np.max(np.abs(indata)))
+                    self.volume_level.emit(min(peak, 1.0))
 
-            recorded_chunks = []
-
-            def audio_callback(indata, frames, time_info, status_flags):
-                if not self.is_recording:
-                    raise sd.CallbackStop()
-                # Downmix multi-channel to mono
-                if indata.ndim > 1 and indata.shape[1] > 1:
-                    mono = np.mean(indata, axis=1)
-                else:
-                    mono = indata.flatten()
-                recorded_chunks.append(mono.copy())
-                peak = float(np.max(np.abs(mono))) if len(mono) > 0 else 0.0
-                self.volume_level.emit(min(peak * 1.5, 1.0))
-
-            # Resilient multi-tier stream opening: chosen device -> default input -> 16kHz mono safe fallback
-            stream = None
-            try:
                 stream_args = {
-                    "samplerate": native_sr,
-                    "channels": native_channels,
+                    "samplerate": self.samplerate,
+                    "channels": 1,
                     "callback": audio_callback,
-                    "blocksize": int(native_sr * 0.1)
+                    "blocksize": int(self.samplerate * 0.1)  # 100ms blocks
                 }
                 if self.device_index is not None:
                     stream_args["device"] = self.device_index
-                stream = sd.InputStream(**stream_args)
-            except Exception as e1:
-                print(f"[RealtimeRecorderWorker] Stream open failed on device {self.device_index}: {e1}. Retrying with safe default input...")
-                try:
-                    stream = sd.InputStream(channels=min(2, native_channels), samplerate=44100, callback=audio_callback, blocksize=int(44100 * 0.1))
-                except Exception as e2:
-                    print(f"[RealtimeRecorderWorker] Default input fallback failed: {e2}. Falling back to 16kHz mono...")
-                    stream = sd.InputStream(channels=1, samplerate=16000, callback=audio_callback, blocksize=1600)
 
-            with stream:
-                while self.is_recording:
-                    elapsed = int(time.time() - self.start_time)
-                    hrs = elapsed // 3600
-                    mins = (elapsed % 3600) // 60
-                    secs = elapsed % 60
-                    self.recording_time.emit(f"{hrs:02}:{mins:02}:{secs:02}")
-                    sd.sleep(100)
+                with sd.InputStream(**stream_args):
+                    while self.is_recording:
+                        elapsed = int(time.time() - self.start_time)
+                        hrs = elapsed // 3600
+                        mins = (elapsed % 3600) // 60
+                        secs = elapsed % 60
+                        self.recording_time.emit(f"{hrs:02}:{mins:02}:{secs:02}")
+                        sd.sleep(100)
 
-            # Assemble full audio and apply vocal enhancement
-            if recorded_chunks:
-                full_audio = np.concatenate(recorded_chunks)
-            else:
-                full_audio = np.array([], dtype=np.float32)
-
-            if len(full_audio) > 0:
-                full_audio = full_audio - float(np.mean(full_audio))
-                peak = float(np.max(np.abs(full_audio)))
-                if peak > 0.005:
-                    full_audio = (full_audio / peak) * 0.95
-
-                # Resample to 16 kHz if necessary
-                if native_sr != 16000 and len(full_audio) > 0:
-                    try:
-                        import scipy.signal
-                        target_samples = int(len(full_audio) * 16000 / native_sr)
-                        full_audio = scipy.signal.resample(full_audio, target_samples)
-                        target_sr = 16000
-                    except Exception:
-                        target_sr = native_sr
-                else:
-                    target_sr = native_sr
-
-                sf.write(self.output_path, full_audio, target_sr, subtype='PCM_16')
-            else:
-                sf.write(self.output_path, np.zeros(16000, dtype=np.float32), 16000, subtype='PCM_16')
+            # Apply peak audio normalization and DC offset removal for crisp Whisper speech recognition
+            try:
+                raw_audio, sr = sf.read(self.output_path)
+                if len(raw_audio) > 0:
+                    raw_audio = raw_audio - float(np.mean(raw_audio))
+                    peak = float(np.max(np.abs(raw_audio)))
+                    if peak > 0.005:
+                        norm_audio = (raw_audio / peak) * 0.95
+                        sf.write(self.output_path, norm_audio, sr, subtype='PCM_16')
+            except Exception as norm_err:
+                print(f"[Microphone Normalization]: {norm_err}")
 
             self.status.emit("Recording saved.")
             self.finished_recording.emit(self.output_path)

@@ -11,62 +11,6 @@ import json
 import math
 from datetime import datetime
 from core_engine import resource_path
-import urllib.request
-import urllib.error
-# 50 Engaging Conversation & Icebreaker Questions
-ICEBREAKER_QUESTIONS = [
-    "What is your all-time favorite video game or movie?",
-    "If you could immediately become fluent in any language, which would you pick?",
-    "What is a creative hobby or project you have always wanted to explore?",
-    "Coffee or tea, and how do you like it prepared?",
-    "If you could travel anywhere in the world tomorrow, where would you go?",
-    "What is the best piece of advice you have ever received?",
-    "Are you more of an early morning person or a late-night focus warrior?",
-    "What genre of music helps you concentrate the best?",
-    "If you had access to a supercomputer with unlimited compute, what would you simulate?",
-    "What was the first technology or gadget that truly amazed you as a kid?",
-    "Do you prefer reading physical books, audiobooks, or digital articles?",
-    "What is your favorite comfort food when you need to recharge?",
-    "If you could have dinner with any historical scientist or thinker, who would it be?",
-    "What is a personal skill you are actively working to improve this year?",
-    "Would you rather explore deep ocean depths or outer space?",
-    "What is the most memorable road trip or vacation you have ever taken?",
-    "If you were to write a book, what genre or topic would it cover?",
-    "What is one application or software tool you use every single day?",
-    "Do you enjoy board games, card games, or digital gaming more?",
-    "What is your ideal way to unwind after a high-intensity workday?",
-    "If you had to teach a 30-minute masterclass right now, what topic would you teach?",
-    "What is an interesting podcast or YouTube channel you recently discovered?",
-    "Do you prefer living in a bustling metropolis or a quiet nature retreat?",
-    "What is a futuristic technology you hope to see in your lifetime?",
-    "If you could compose a soundtrack for your daily routine, what instrument would lead?",
-    "What is the most fascinating science documentary you have watched?",
-    "Do you prefer working with hardware and hands-on tools or software and code?",
-    "What is a simple habit that significantly improved your daily productivity?",
-    "If you could visit any fictional universe for a single day, which one would it be?",
-    "What kind of stories inspire you the most: true biographies or imaginative fiction?",
-    "What is your favorite season of the year and why?",
-    "If you could design your dream workspace, what would be the centerpiece?",
-    "What is the most interesting piece of trivia you know off the top of your head?",
-    "Do you prefer mechanical keyboards, membrane keys, or silent typing setups?",
-    "What is a sport or outdoor activity you genuinely enjoy?",
-    "If you had a robot assistant at home, what is the first chore you would delegate?",
-    "What is your favorite memory involving friends or family?",
-    "Do you prefer deep analytical problem-solving or rapid creative brainstorming?",
-    "What is a life lesson you learned the hard way but are grateful for?",
-    "If you could master any musical instrument overnight, which would you choose?",
-    "What is your favorite way to discover new ideas or inspiration?",
-    "Do you prefer minimalist designs or rich, detailed aesthetic styles?",
-    "What is a film whose cinematography or visual style left a lasting impression on you?",
-    "If you could build any mobile or desktop app to solve a personal pain point, what would it do?",
-    "What is your favorite philosophical concept or quote?",
-    "Do you prefer cooking homemade meals or discovering local restaurants?",
-    "What is a subject you disliked in school but now find genuinely intriguing?",
-    "If you could witness any major historical event as a neutral observer, what would it be?",
-    "What is something small that consistently brings a smile to your face?",
-    "What are you most excited to accomplish in the coming months?"
-]
-
 
 # Safe import for llama_cpp
 try:
@@ -102,17 +46,9 @@ class BuiltinAIAssistant:
             core_query = raw_query
             q_clean = q
 
-        # Check if user is sharing their name (e.g. "my name is Alex", "i am Alex", "call me Alex")
-        name_match = re.search(r'\b(?:my name is|i am|i\'m|call me)\s+([a-zA-Z]{2,25})\b', raw_query, re.IGNORECASE)
-        if name_match:
-            user_name = name_match.group(1).title()
-            setattr(self, 'user_name', user_name)
-            return f"Pleased to meet you, {user_name}! It is great to chat with you while TinyLytic processes your tasks. What kind of projects or topics are you currently working on?"
-
         # Pure greeting alone
         if q in ["hi", "hello", "hey", "greetings", "good morning", "good evening", "good afternoon"]:
-            name_suffix = f", {getattr(self, 'user_name', '')}" if getattr(self, 'user_name', None) else ""
-            return f"Hello{name_suffix}. How can I assist you today? You can ask any question, chat about any topic, or load a transcript to summarize and format chapters."
+            return "Hello. How can I assist you today? You can ask any question, request calculations, or load a transcript to summarize and format chapters."
 
         # Help / Capabilities query
         if q in ["help", "what can you do", "features", "commands"]:
@@ -744,52 +680,9 @@ class AIChatManager:
         self.current_model_type = "LLaMA"
         return self.llama_model
 
-    def query_ollama(self, prompt, model="llama3"):
-        """Query local Ollama instance running at http://127.0.0.1:11434."""
-        try:
-            url = "http://127.0.0.1:11434/api/generate"
-            payload = json.dumps({
-                "model": model,
-                "prompt": prompt,
-                "stream": False
-            }).encode("utf-8")
-            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=12) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                return result.get("response", "").strip()
-        except Exception as e:
-            print(f"[Ollama Query Error]: {e}")
-            return None
-
-    def get_ollama_models(self):
-        """Fetch list of models available in local Ollama daemon."""
-        try:
-            url = "http://127.0.0.1:11434/api/tags"
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=2) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                models = [m.get("name") for m in result.get("models", []) if m.get("name")]
-                return models
-        except Exception:
-            return []
-
     def generate_response(self, user_query, model_choice="Built-in AI Assistant (Recommended)"):
         """Generate response using selected model with fallback."""
-        choice_lower = model_choice.lower()
-
-        # 1. Ollama local integration
-        if "ollama" in choice_lower:
-            available_models = self.get_ollama_models()
-            chosen_model = available_models[0] if available_models else "llama3"
-            context_snippet = self.builtin_ai.context_transcript[:1000]
-            ctx_part = f"\nContext: {context_snippet}\n" if context_snippet else ""
-            prompt = f"You are TinyLytic AI Assistant. Answer clearly, accurately, without emojis.{ctx_part}\nUser: {user_query}\nAssistant:"
-            ollama_ans = self.query_ollama(prompt, model=chosen_model)
-            if ollama_ans:
-                return ollama_ans
-
-        # 2. Local LLaMA GGUF
-        if "llama" in choice_lower and HAS_LLAMA:
+        if "llama" in model_choice.lower() and HAS_LLAMA:
             try:
                 gguf_candidates = [
                     resource_path("models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"),

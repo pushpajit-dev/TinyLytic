@@ -277,7 +277,7 @@ def render_caption_frame(base_bgr_frame, current_sec, segments, style: CaptionSt
         lines.append((curr_line, curr_w - space_w))
 
     # Calculate overall caption block height with user-controlled line gap
-    line_spacing = int(actual_font_size * 0.22) + int(getattr(style, "line_gap", 8) * scale_factor)
+    line_spacing = int(actual_font_size * 0.22) + int(getattr(style, "line_gap", 8) * scale)
     block_h = len(lines) * int(max_h) + (len(lines) - 1) * line_spacing
 
     # Vertical positioning with animation offsets
@@ -559,7 +559,6 @@ class VideoCaptionStudioDialog(QDialog):
         self.export_worker = None
 
         self.initVideo()
-        self.initAudio()
         self.initUI()
 
         # Playback timer
@@ -568,62 +567,6 @@ class VideoCaptionStudioDialog(QDialog):
 
         # Show initial frame
         self.showCurrentFrame()
-
-    def initAudio(self):
-        """Initialize synchronized audio playback engine via QtMultimedia."""
-        self.audio_player = None
-        self.audio_output = None
-        try:
-            from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
-            from PyQt6.QtCore import QUrl
-            self.audio_player = QMediaPlayer(self)
-            self.audio_output = QAudioOutput(self)
-            self.audio_player.setAudioOutput(self.audio_output)
-            self.audio_output.setVolume(1.0)
-
-            if os.path.exists(self.video_path):
-                abs_path = os.path.abspath(self.video_path)
-                self.audio_player.setSource(QUrl.fromLocalFile(abs_path))
-
-                # Handle audio decode errors with automatic PCM WAV extraction
-                def on_media_error(error, error_string):
-                    print(f"[Caption Studio Audio]: {error} - {error_string}. Extracting WAV track fallback...")
-                    self.extractAndLoadFallbackAudio()
-                self.audio_player.errorOccurred.connect(on_media_error)
-        except Exception as e:
-            print(f"[Caption Studio Audio Init Error]: {e}")
-
-    def extractAndLoadFallbackAudio(self):
-        """Extract audio stream to a PCM 16-bit WAV file asynchronously with timeout."""
-        if getattr(self, '_fallback_audio_attempted', False):
-            return
-        self._fallback_audio_attempted = True
-        import threading
-        def worker():
-            try:
-                import tempfile, subprocess
-                from PyQt6.QtCore import QUrl
-                from core_engine import setup_ffmpeg
-                ffmpeg_bin = setup_ffmpeg() or "ffmpeg"
-                base_name = os.path.basename(self.video_path)
-                safe_name = "".join(c for c in base_name if c.isalnum())[:20]
-                wav_path = os.path.join(tempfile.gettempdir(), f"cs_{safe_name}.wav")
-                if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
-                    subprocess.run(
-                        [ffmpeg_bin, "-y", "-i", self.video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", wav_path],
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25
-                    )
-                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 1000 and hasattr(self, 'audio_player') and self.audio_player:
-                    self.audio_player.setSource(QUrl.fromLocalFile(wav_path))
-            except Exception as e:
-                print(f"[Caption Studio Audio Fallback Error]: {e}")
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def onVolumeChanged(self, val):
-        """Adjust playback volume."""
-        if hasattr(self, 'audio_output') and self.audio_output:
-            self.audio_output.setVolume(val / 100.0)
 
     def initVideo(self):
         if not HAS_CV2 or not os.path.exists(self.video_path):
@@ -678,19 +621,6 @@ class VideoCaptionStudioDialog(QDialog):
         self.time_label = QLabel(f"00:00 / {format_seconds(self.duration_sec)}")
         self.time_label.setStyleSheet("color: #e2e8f0; font-family: monospace; font-size: 11pt; padding: 0 8px;")
         control_row.addWidget(self.time_label)
-
-        # Volume Slider for Audio Playback
-        lbl_vol = QLabel("Vol:")
-        lbl_vol.setStyleSheet("color: #a0aec0; padding-left: 6px;")
-        control_row.addWidget(lbl_vol)
-
-        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
-        self.vol_slider.setRange(0, 100)
-        self.vol_slider.setValue(100)
-        self.vol_slider.setFixedWidth(75)
-        self.vol_slider.setToolTip("Video Audio Volume")
-        self.vol_slider.valueChanged.connect(self.onVolumeChanged)
-        control_row.addWidget(self.vol_slider)
 
         control_row.addStretch()
 
@@ -931,18 +861,12 @@ class VideoCaptionStudioDialog(QDialog):
         if self.is_playing:
             self.is_playing = False
             self.play_timer.stop()
-            if hasattr(self, 'audio_player') and self.audio_player:
-                self.audio_player.pause()
             self.btn_play.setText("Play")
             self.btn_play.setStyleSheet("background-color: #2b6cb0; color: #ffffff; font-weight: bold; padding: 6px 14px;")
         else:
             self.is_playing = True
             interval_ms = max(15, int(1000.0 / (self.fps or 30.0)))
             self.play_timer.start(interval_ms)
-            if hasattr(self, 'audio_player') and self.audio_player:
-                pos_ms = int((self.current_frame / (self.fps or 30.0)) * 1000)
-                self.audio_player.setPosition(pos_ms)
-                self.audio_player.play()
             self.btn_play.setText("Pause")
             self.btn_play.setStyleSheet("background-color: #c53030; color: #ffffff; font-weight: bold; padding: 6px 14px;")
 
@@ -953,8 +877,6 @@ class VideoCaptionStudioDialog(QDialog):
         if not ret or frame is None:
             self.current_frame = 0
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            if hasattr(self, 'audio_player') and self.audio_player:
-                self.audio_player.setPosition(0)
             self.togglePlay()
             return
 
@@ -977,9 +899,6 @@ class VideoCaptionStudioDialog(QDialog):
     def onSeekReleased(self):
         if self.cap:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-        if hasattr(self, 'audio_player') and self.audio_player:
-            pos_ms = int((self.current_frame / (self.fps or 30.0)) * 1000)
-            self.audio_player.setPosition(pos_ms)
         self.showCurrentFrame()
 
     def seekRelative(self, sec_delta):
