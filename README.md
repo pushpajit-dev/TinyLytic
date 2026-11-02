@@ -1,10 +1,5 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="TinyLytic Banner" width="100%">
-
-<br><br>
-
-<img src="assets/logo.png" alt="TinyLytic Logo" width="130">
 
 # TinyLytic Studio
 
@@ -26,7 +21,7 @@
 </p>
 
 <p align="center">
-  <b>Direct Installer Link:</b> <a href="https://drive.google.com/file/d/19dMnY4dcWLEKgbB3afHXkKa8XyAUBFcJ/view?usp=sharing">Download TinyLytic_Setup_v2.0.exe (Google Drive)</a>
+  <b>Direct Installer Link:</b> <a href="https://drive.google.com/file/d/19dMnY4dcWLEKgbB3afHXkKa8XyAUBFcJ/view?usp=sharing">Download TinyLytic_Setup_v2.0.exe</a>
 </p>
 
 <br>
