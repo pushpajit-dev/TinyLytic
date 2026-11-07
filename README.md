@@ -15,13 +15,13 @@
 <br>
 
 <p align="center">
-  <a href="https://drive.google.com/file/d/19dMnY4dcWLEKgbB3afHXkKa8XyAUBFcJ/view?usp=sharing">
+  <a href="https://drive.google.com/file/d/1ZD-9REz6I10tTnOzF2UReFaB9MdNRD_i/view?usp=drive_link">
     <img src="https://img.shields.io/badge/DOWNLOAD-TinyLytic%20Setup%20v2.0%20(EXE)-2b6cb0?style=for-the-badge&logo=windows&logoColor=white" alt="Download TinyLytic Installer">
   </a>
 </p>
 
 <p align="center">
-  <b>Direct Installer Link:</b> <a href="https://drive.google.com/file/d/19dMnY4dcWLEKgbB3afHXkKa8XyAUBFcJ/view?usp=sharing">Download TinyLytic_Setup_v2.0.exe</a>
+  <b>Direct Installer Link:</b> <a href="https://drive.google.com/file/d/1ZD-9REz6I10tTnOzF2UReFaB9MdNRD_i/view?usp=drive_link">Download TinyLytic_Setup_v2.0.exe</a>
 </p>
 
 <br>
@@ -106,7 +106,7 @@ TinyLytic Studio runs completely locally on your hardware. It offers full offlin
 
 | Package Type | Architecture | File Size | Download |
 | :--- | :--- | :--- | :--- |
-| **Windows Full Setup (.exe)** | Windows 64-bit | ~2.11 GB | [Download via Google Drive](https://drive.google.com/file/d/19dMnY4dcWLEKgbB3afHXkKa8XyAUBFcJ/view?usp=sharing) |
+| **Windows Full Setup (.exe)** | Windows 64-bit | ~2.11 GB | [Download via Google Drive](https://drive.google.com/file/d/1ZD-9REz6I10tTnOzF2UReFaB9MdNRD_i/view?usp=drive_link) |
 | **Standalone MSI Installer (.msi)** | Windows 64-bit | ~1.81 MB | Found in `Installers_Output\TinyLytic_Setup_v2.0.msi` |
 
 ### Method 1: Windows Executable Setup (Recommended)
